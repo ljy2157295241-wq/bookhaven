@@ -1,0 +1,214 @@
+﻿
+services:
+  mysql:
+    image: docker.1ms.run/mysql:8.4
+    container_name: bookhaven-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_ROOT_HOST: "%"
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./sql:/docker-entrypoint-initdb.d   # 閼奉亜濮╅幍褑顢戦崚婵嗩潗閸栨牞鍓奸張?
+      - mysql-data:/var/lib/mysql
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - bookhaven-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: bookhaven-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - bookhaven-net
+
+  rabbitmq:
+    image: docker.1ms.run/rabbitmq:latest
+    container_name: bookhaven-rabbitmq
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    networks:
+      - bookhaven-net
+
+  nacos:
+    image: xpj2mydrmryrbb24kv.xuanyuan.run/nacos/nacos-server:v2.4.3
+    container_name: bookhaven-nacos
+    environment:
+      MODE: standalone
+      PREFER_HOST_MODE: hostname
+      JVM_XMS: 256m
+      JVM_XMX: 512m
+      NACOS_AUTH_TOKEN: o0TRCWneg7wX71MY3yGdgvlLkfavrthHxUNcwUz8awY=
+      NACOS_AUTH_IDENTITY_KEY: serverIdentity
+      NACOS_AUTH_IDENTITY_VALUE: security
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+    networks:
+      - bookhaven-net
+
+  seata-server:
+    image: xpj2mydrmryrbb24kv.xuanyuan.run/seataio/seata-server:latest
+    container_name: bookhaven-seata
+    environment:
+      SEATA_PORT: 8091
+      STORE_MODE: db
+      SEATA_CONFIG_NAME: file:/root/seata-config/registry
+    ports:
+      - "8091:8091"
+    volumes:
+      - ./seata-config:/root/seata-config
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - bookhaven-net
+
+  # ========== 瀵邦喗婀囬崝?==========
+  user-service:
+    build:
+      context: ./user-service
+      dockerfile: Dockerfile
+    container_name: bookhaven-user
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/bookhaven_user?useUnicode=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci&connectionInitSqls=SET NAMES utf8mb4&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: root
+      SPRING_REDIS_HOST: redis
+      SPRING_CLOUD_NACOS_DISCOVERY_SERVER_ADDR: nacos:8848
+    depends_on:
+      - mysql
+      - redis
+      - nacos
+    networks:
+      - bookhaven-net
+
+  product-service:
+    build:
+      context: ./product-service
+      dockerfile: Dockerfile
+    container_name: bookhaven-product
+    ports:
+      - "8082:8082"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/bookhaven_product?useUnicode=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci&connectionInitSqls=SET NAMES utf8mb4&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: root
+      SPRING_REDIS_HOST: redis
+      SPRING_CLOUD_NACOS_DISCOVERY_SERVER_ADDR: nacos:8848
+    depends_on:
+      - mysql
+      - redis
+      - nacos
+    networks:
+      - bookhaven-net
+
+  cart-service:
+    build:
+      context: ./cart-service
+      dockerfile: Dockerfile
+    container_name: bookhaven-cart
+    ports:
+      - "8083:8083"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/bookhaven_cart?useUnicode=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci&connectionInitSqls=SET NAMES utf8mb4&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: root
+      SPRING_CLOUD_NACOS_DISCOVERY_SERVER_ADDR: nacos:8848
+    depends_on:
+      - mysql
+      - nacos
+    networks:
+      - bookhaven-net
+
+  order-service:
+    build:
+      context: ./order-service
+      dockerfile: Dockerfile
+    container_name: bookhaven-order
+    ports:
+      - "8084:8084"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/bookhaven_order?useUnicode=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci&connectionInitSqls=SET NAMES utf8mb4&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: root
+      SPRING_REDIS_HOST: redis
+      SPRING_CLOUD_NACOS_DISCOVERY_SERVER_ADDR: nacos:8848
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SEATA_SERVICE_GROUPLIST_DEFAULT: seata-server:8091
+      SEATA_ENABLED: "false"
+      SEATA_SERVICE_VGROUP_MAPPING_BOOKHAVEN_TX_GROUP: default
+    depends_on:
+      - mysql
+      - redis
+      - nacos
+      - rabbitmq
+    networks:
+      - bookhaven-net
+
+  payment-service:
+    build:
+      context: ./payment-service
+      dockerfile: Dockerfile
+    container_name: bookhaven-payment
+    ports:
+      - "8085:8085"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/bookhaven_payment?useUnicode=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci&connectionInitSqls=SET NAMES utf8mb4&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: root
+      SPRING_CLOUD_NACOS_DISCOVERY_SERVER_ADDR: nacos:8848
+      SPRING_RABBITMQ_HOST: rabbitmq
+    depends_on:
+      - mysql
+      - nacos
+      - rabbitmq
+    networks:
+      - bookhaven-net
+
+  gateway:
+    build:
+      context: ./bookhaven-gateway
+      dockerfile: Dockerfile
+    container_name: bookhaven-gateway
+    ports:
+      - "8088:8088"
+    environment:
+      SPRING_CLOUD_NACOS_DISCOVERY_SERVER_ADDR: nacos:8848
+    depends_on:
+      - nacos
+      - user-service
+      - product-service
+      - cart-service
+      - order-service
+      - payment-service
+    networks:
+      - bookhaven-net
+
+networks:
+  bookhaven-net:
+    driver: bridge
+
+volumes:
+  mysql-data:
+
+
+
+
+
+
+
+
+
